@@ -6,6 +6,8 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+    background-color: #282c34;
+
 }
 
 code {
@@ -15,4 +17,8 @@ code {
 
 p + p {
   margin-top: 0;
+}
+
+.accordion-item {
+background-color: #282c34;
 }
