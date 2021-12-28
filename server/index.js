@@ -12,6 +12,8 @@ const createClient3 = require('redis3').createClient;
 const connectRedis = require('connect-redis');
 let Parser = require('rss-parser');
 let parser = new Parser();
+const igdb = require('igdb-api-node').default;
+let igdbClient;
 
 const redis = createClient({
   url: process.env.REDIS_URL || "redis://127.0.0.1:6379",
@@ -37,6 +39,15 @@ async function main() {
     });
 
   } else {
+
+    // Get twitch token for igdb
+    const twitchResponse = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${process.env.TWITCH_CLIENT_ID}&client_secret=${process.env.TWITCH_CLIENT_SECRET}&grant_type=client_credentials`,{method: "POST"});
+    const twitchJson = await twitchResponse.json();
+    const igdbToken = twitchJson.access_token;
+    const igdbClient = igdb(process.env.TWITCH_CLIENT_ID, igdbToken);
+
+    //TODO: Set up a timer to update it based on expiry.
+
     const app = express();
     app.use(bodyParser.json());
 
@@ -154,8 +165,8 @@ async function main() {
     }));
 
     app.get('/api/games', catchAsync(async (req, res) => {
-      const data = await redis.sendCommand(['SORT', 'games', 'BY', '*->rank', 'get', '*->name', 'get', '*->rank', 'get', '#', 'get', '*->episode']);
-      const fields  = ["name", "rank", "id", "episode"] // Needs changing based on above query
+      const data = await redis.sendCommand(['SORT', 'games', 'BY', '*->rank', 'get', '*->name', 'get', '*->rank', 'get', '#', 'get', '*->episode', 'get', '*->coverURL', 'get', '*->igdbId']);
+      const fields  = ["name", "rank", "id", "episode", "coverURL", "igdbId"] // Needs changing based on above query
       const nGames = data.length / fields.length ;
       const games = [];
       for (let i = 0; i < nGames; i+=1){
@@ -164,7 +175,9 @@ async function main() {
           [fields[0]]: data[offset],
           [fields[1]]: data[offset+1],
           [fields[2]]: data[offset+2].split(":")[1],
-          [fields[3]]: data[offset+3]
+          [fields[3]]: data[offset+3],
+          [fields[4]]: data[offset+4],
+          [fields[5]]: data[offset+5],
         })
       }
       res.send(games);
@@ -200,6 +213,13 @@ async function main() {
       await redis.hSet(`game:${nextGameId}`, "name", req.body.name);
       await redis.hSet(`game:${nextGameId}`, "rank", req.body.rank);
       await redis.hSet(`game:${nextGameId}`, "originalRank", req.body.rank);
+
+      if (req.body.igdbId){
+        await redis.hSet(`game:${nextGameID}`, "igdbId", req.body.igdbId)
+        const igdbResult = await igdbClient.fields('url').where(`game=${req.body.igdbId}`).request('/covers')
+        await redis.hSet(`game:${nextGameID}`, "coverURL", `https:${res.data[0].url}`)
+      }
+
       await redis.sAdd('games', `game:${nextGameId}`);
 
       res.send("");
@@ -238,7 +258,6 @@ async function main() {
       games = games.filter(game => game.key !== `game:${req.params.id}`);
 
       if (req.body.rank === "0" && oldRank !=="0" ){
-        console.log("remove adn open vote")
         //Then we're removing it from the list and opening a vote...
         // All games lower move up one rank.
         for (let game of games) {
@@ -248,7 +267,6 @@ async function main() {
           }
         }
       } else if (req.body.rank !== "0" && oldRank === "0" ){
-        console.log("closing vote")
         // Then we closed a vote and inserting it in to the list.
         // All games lower move down one rank.
         for (let game of games) {
@@ -259,7 +277,6 @@ async function main() {
           }
         }
       } else {
-        console.log("moving")
         // We're moving it within the list
         // Update ranks for games between old a new position.
         // Whether rank goes up or down depends on which direction the game is moving
@@ -272,21 +289,25 @@ async function main() {
           }
         }
       }
+
       // Set game
       await redis.hSet(`game:${req.params.id}`, "episode", req.body.episode);
       await redis.hSet(`game:${req.params.id}`, "name", req.body.name);
       await redis.hSet(`game:${req.params.id}`, "rank", req.body.rank);
       await redis.sAdd('games', `game:${req.params.id}`);
 
+      if (req.body.igdbId){
+        await redis.hSet(`game:${req.params.id}`, "igdbId", req.body.igdbId)
+        const igdbResult = await igdbClient.fields('url').where(`game=${req.body.igdbId}`).request('/covers')
+        await redis.hSet(`game:${req.params.id}`, "coverURL", `https:${igdbResult.data[0].url}`)
+      }
+
       let feed = await parser.parseURL('https://feed.podbean.com/oldgamersalmanac/feed.xml');
-      console.log(feed.title);
 
       const episode = feed.items.filter(item => {
-        console.log(item.itunes.episode, req.body.episode)
         return item.itunes.episode === req.body.episode.toString()
       })[0];
 
-      console.log(episode)
 
       // Did we just close a vote?
       if (oldRank === "0" && req.body.rank !== "0"){
@@ -319,10 +340,11 @@ async function main() {
 
       const game = {};
 
-      // Set game
+      // Get game
       game.episode = await redis.hGet(`game:${req.params.id}`, "episode");
       game.name = await redis.hGet(`game:${req.params.id}`, "name");
       game.rank = await redis.hGet(`game:${req.params.id}`, "rank");
+      game.igdbId = await redis.hGet(`game:${req.params.id}`, "igdbId");
 
       res.send(game);
     }));
@@ -386,7 +408,6 @@ async function main() {
     app.get('/api/leaderboard', catchAsync(async (req, res) => {
       // Get users who voted
       const users = await redis.sMembers("voters")
-      console.log(users)
       const data = await redis.sendCommand(['SORT', 'games', 'BY', '*->rank', 'get', '*->rank']);
       const fields  = ["rank"] // Needs changing based on above query
       const currentListSize = data.filter(x => x !== "0").length
@@ -399,15 +420,12 @@ async function main() {
           let scores = await Promise.all(gameIds.map(async (gameId) => {
             // get vote
             const vote = await redis.hGetAll(`${userid}:vote:${gameId}`);
-            console.log(vote.rank)
             // get actual rank
             const gameRank = await redis.hGet(`game:${gameId}`, 'originalRank');
             const gameVoteClosed = await redis.hGet(`game:${gameId}`, 'voteClosedTimestamp');
-            console.log("timestamps", gameId, gameVoteClosed, vote.timestamp)
 
             if (vote.timestamp > gameVoteClosed){ return Infinity };
             const originalListSize = await redis.hGet(`game:${gameId}`, 'originalListSize');
-            console.log(vote, gameRank, originalListSize)
             return ((vote.rank-gameRank)/originalListSize)**2
           }))
           const user = await redis.hGetAll(`user:${userid}`);

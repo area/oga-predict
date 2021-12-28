@@ -10,6 +10,16 @@ function OGAList(props) {
   const columns = useMemo(() => [
     {
       accessor: "rank",
+      Cell: ({ value, row }) => {
+        return (<React.Fragment><h1>{value}</h1></React.Fragment>)
+      }
+
+    },
+    {
+      accessor: "cover",
+      Cell: ({ value, row }) => {
+        return (<React.Fragment><img style={{"marginRight":"20px"}} src={row.original.coverURL} alt="Cover" /></React.Fragment>)
+      }
     },
     {
       accessor: "name",
