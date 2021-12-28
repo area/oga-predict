@@ -28,7 +28,11 @@ function OGAList(props) {
       }
     },
     { 
-      accessor: "episode"
+      accessor: "episode",
+      Cell: ({ value, row }) => {
+        return ( <a href={row.original.episodeLink}>Episode {value}</a>)
+      }
+
     }
   ]);
 
@@ -52,7 +56,7 @@ function OGAList(props) {
   useEffect(() => {
     fetchData();
   }, []);
-  return (       <header className="App-header"> <Table columns={columns} data={data} /></header>)
+  return ( <React.Fragment><div className="text-center"><h2>The List</h2></div> <Table columns={columns} data={data} /></React.Fragment>)
 }
 
 export default OGAList;

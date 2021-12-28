@@ -27,7 +27,7 @@ function Leaderboard(props) {
     },
     { 
       Header: "Number of predictions",
-      accessor: "nVotes"
+      accessor: "nPredicts"
     }
   ]);
 

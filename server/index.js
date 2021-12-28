@@ -165,8 +165,8 @@ async function main() {
     }));
 
     app.get('/api/games', catchAsync(async (req, res) => {
-      const data = await redis.sendCommand(['SORT', 'games', 'BY', '*->rank', 'get', '*->name', 'get', '*->rank', 'get', '#', 'get', '*->episode', 'get', '*->coverURL', 'get', '*->igdbId']);
-      const fields  = ["name", "rank", "id", "episode", "coverURL", "igdbId"] // Needs changing based on above query
+      const data = await redis.sendCommand(['SORT', 'games', 'BY', '*->rank', 'get', '*->name', 'get', '*->rank', 'get', '#', 'get', '*->episode', 'get', '*->coverURL', 'get', '*->igdbId', 'get', '*->episodeLink']);
+      const fields  = ["name", "rank", "id", "episode", "coverURL", "igdbId", "episodeLink"] // Needs changing based on above query
       const nGames = data.length / fields.length ;
       const games = [];
       for (let i = 0; i < nGames; i+=1){
@@ -178,6 +178,7 @@ async function main() {
           [fields[3]]: data[offset+3],
           [fields[4]]: data[offset+4],
           [fields[5]]: data[offset+5],
+          [fields[6]]: data[offset+6],
         })
       }
       res.send(games);
@@ -215,9 +216,9 @@ async function main() {
       await redis.hSet(`game:${nextGameId}`, "originalRank", req.body.rank);
 
       if (req.body.igdbId){
-        await redis.hSet(`game:${nextGameID}`, "igdbId", req.body.igdbId)
+        await redis.hSet(`game:${nextGameId}`, "igdbId", req.body.igdbId)
         const igdbResult = await igdbClient.fields('url').where(`game=${req.body.igdbId}`).request('/covers')
-        await redis.hSet(`game:${nextGameID}`, "coverURL", `https:${res.data[0].url}`)
+        await redis.hSet(`game:${nextGameId}`, "coverURL", `https:${res.data[0].url.replace('thumb','cover_small')}`)
       }
 
       await redis.sAdd('games', `game:${nextGameId}`);
@@ -258,7 +259,7 @@ async function main() {
       games = games.filter(game => game.key !== `game:${req.params.id}`);
 
       if (req.body.rank === "0" && oldRank !=="0" ){
-        //Then we're removing it from the list and opening a vote...
+        //Then we're removing it from the list and opening a prediction...
         // All games lower move up one rank.
         for (let game of games) {
           if (parseInt(game.rank) > parseInt(oldRank)) {
@@ -267,7 +268,7 @@ async function main() {
           }
         }
       } else if (req.body.rank !== "0" && oldRank === "0" ){
-        // Then we closed a vote and inserting it in to the list.
+        // Then we closed a prediction and inserting it in to the list.
         // All games lower move down one rank.
         for (let game of games) {
           if (parseInt(game.rank) >= parseInt(req.body.rank)) {
@@ -299,7 +300,7 @@ async function main() {
       if (req.body.igdbId){
         await redis.hSet(`game:${req.params.id}`, "igdbId", req.body.igdbId)
         const igdbResult = await igdbClient.fields('url').where(`game=${req.body.igdbId}`).request('/covers')
-        await redis.hSet(`game:${req.params.id}`, "coverURL", `https:${igdbResult.data[0].url}`)
+        await redis.hSet(`game:${req.params.id}`, "coverURL", `https:${igdbResult.data[0].url.replace('thumb','cover_small')}`)
       }
 
       let feed = await parser.parseURL('https://feed.podbean.com/oldgamersalmanac/feed.xml');
@@ -307,11 +308,12 @@ async function main() {
       const episode = feed.items.filter(item => {
         return item.itunes.episode === req.body.episode.toString()
       })[0];
+      await redis.hSet(`game:${req.params.id}`, "episodeLink", episode.link);
 
 
-      // Did we just close a vote?
+      // Did we just close a predict?
       if (oldRank === "0" && req.body.rank !== "0"){
-        await redis.hSet(`game:${req.params.id}`, "voteClosedTimestamp", new Date(episode.isoDate).getTime());
+        await redis.hSet(`game:${req.params.id}`, "predictClosedTimestamp", new Date(episode.isoDate).getTime());
         await redis.hSet(`game:${req.params.id}`, "originalRank", req.body.rank);
         let nonZeroCount = 1; // We are now in the list, but not in games which exluded ourselves
         // How many games have a non-zero rank?
@@ -349,9 +351,9 @@ async function main() {
       res.send(game);
     }));
 
-    app.get('/api/votes', catchAsync(async (req, res) => {
-      const data = await redis.sendCommand(['SORT', 'games', 'BY', '*->rank', 'get', '*->name', 'get', '*->rank', 'get', '#']);
-      const fields  = ["name", "rank", "id"] // Needs changing based on above query
+    app.get('/api/predictions', catchAsync(async (req, res) => {
+      const data = await redis.sendCommand(['SORT', 'games', 'BY', '*->rank', 'get', '*->name', 'get', '*->rank', 'get', '#', 'get', '*->coverURL']);
+      const fields  = ["name", "rank", "id", "coverURL" ] // Needs changing based on above query
       const nGames = data.length / fields.length ;
       const games = [];
       for (let i = 0; i < nGames; i+=1){
@@ -360,13 +362,14 @@ async function main() {
           [fields[0]]: data[offset],
           [fields[1]]: data[offset+1],
           [fields[2]]: data[offset+2].split(":")[1],
+          [fields[3]]: data[offset+3],
         })
       }
       res.send(games.filter(game => game.rank === "0"));
     }));
 
 
-    app.post('/api/vote', catchAsync(async (req, res) => {
+    app.post('/api/predict', catchAsync(async (req, res) => {
       // Is logged in?
       const discordId = await redis.hGet(`session:${req.session.id}`, 'discordId');
       if (!discordId) { return res.status(400).send() }
@@ -375,39 +378,39 @@ async function main() {
       let oldRank = await redis.hGet(`game:${req.body.id}`, "rank")
       if (oldRank !== "0" ) { return res.status(404).send() }
 
-      // Record vote for user
+      // Record predict for user
       // Record game id, timestamp, predicted rank
-      await redis.sAdd(`voters`, discordId)
-      await redis.sAdd(`${discordId}:votes`, req.body.id)
-      await redis.hSet(`${discordId}:vote:${req.body.id}`, "timestamp", Date.now())
-      await redis.hSet(`${discordId}:vote:${req.body.id}`, "rank", req.body.rank)
+      await redis.sAdd(`predictors`, discordId)
+      await redis.sAdd(`${discordId}:predicts`, req.body.id)
+      await redis.hSet(`${discordId}:predict:${req.body.id}`, "timestamp", Date.now())
+      await redis.hSet(`${discordId}:predict:${req.body.id}`, "rank", req.body.rank)
 
       res.send("");
     }));
 
-    app.get('/api/votes/mine', catchAsync(async (req, res) => {
+    app.get('/api/predictions/mine', catchAsync(async (req, res) => {
       // Is logged in?
       const discordId = await redis.hGet(`session:${req.session.id}`, 'discordId');
       if (!discordId) { return res.status(400).send() }
-      const data = await redis.sendCommand(['SORT', `${discordId}:votes`, 'BY', '*->rank', 'get', '#', 'get', `${discordId}:vote:*->timestamp`, 'get', `${discordId}:vote:*->rank`]);
+      const data = await redis.sendCommand(['SORT', `${discordId}:predicts`, 'BY', '*->rank', 'get', '#', 'get', `${discordId}:predict:*->timestamp`, 'get', `${discordId}:predict:*->rank`]);
       const fields  = ["id", "timestamp", "rank"] // Needs changing based on above query
       const nGames = data.length / fields.length ;
-      const votes = [];
+      const predicts = [];
       for (let i = 0; i < nGames; i+=1){
         const offset = i * fields.length;
-        votes.push({
+        predicts.push({
           [fields[0]]: data[offset],
           [fields[1]]: data[offset+1],
           [fields[2]]: data[offset+2],
         })
       }
 
-      res.send(votes);
+      res.send(predicts);
     }));
 
     app.get('/api/leaderboard', catchAsync(async (req, res) => {
-      // Get users who voted
-      const users = await redis.sMembers("voters")
+      // Get users who predicted
+      const users = await redis.sMembers("predictors")
       const data = await redis.sendCommand(['SORT', 'games', 'BY', '*->rank', 'get', '*->rank']);
       const fields  = ["rank"] // Needs changing based on above query
       const currentListSize = data.filter(x => x !== "0").length
@@ -415,18 +418,18 @@ async function main() {
       // For each user ...
       let leaderboard = await Promise.all(
         users.map(async (userid) => {
-          // For each game they voted for...
-          const gameIds = await redis.sMembers(`${userid}:votes`)
+          // For each game they predicted for...
+          const gameIds = await redis.sMembers(`${userid}:predicts`)
           let scores = await Promise.all(gameIds.map(async (gameId) => {
-            // get vote
-            const vote = await redis.hGetAll(`${userid}:vote:${gameId}`);
+            // get predict
+            const predict = await redis.hGetAll(`${userid}:predict:${gameId}`);
             // get actual rank
             const gameRank = await redis.hGet(`game:${gameId}`, 'originalRank');
-            const gameVoteClosed = await redis.hGet(`game:${gameId}`, 'voteClosedTimestamp');
+            const gamePredictClosed = await redis.hGet(`game:${gameId}`, 'predictClosedTimestamp');
 
-            if (vote.timestamp > gameVoteClosed){ return Infinity };
+            if (predict.timestamp > gamePredictClosed){ return Infinity };
             const originalListSize = await redis.hGet(`game:${gameId}`, 'originalListSize');
-            return ((vote.rank-gameRank)/originalListSize)**2
+            return ((predict.rank-gameRank)/originalListSize)**2
           }))
           const user = await redis.hGetAll(`user:${userid}`);
           scores = scores.filter(x => x !==Infinity)
@@ -438,12 +441,12 @@ async function main() {
           }
           score = (score * currentListSize).toFixed(2)
 
-          return {name: user.uniqueName, score, nVotes:scores.length, avatar: `https://cdn.discordapp.com/avatars/${userid}/${user.avatar}.png` };
+          return {name: user.uniqueName, score, nPredicts:scores.length, avatar: `https://cdn.discordapp.com/avatars/${userid}/${user.avatar}.png` };
         })
       );
 
-      // Filter out anyone who only voted late
-      leaderboard = leaderboard.filter(x => x.nVotes !== 0);
+      // Filter out anyone who only predicted late
+      leaderboard = leaderboard.filter(x => x.nPredicts !== 0);
 
       // Order users by score.
       leaderboard.sort((a,b) => a.score - b.score)

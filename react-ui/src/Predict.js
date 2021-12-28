@@ -1,13 +1,13 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import VoteForm from './VoteForm';
+import PredictForm from './PredictForm';
 
-function Vote(props) {
+function Predict(props) {
 
-  const [votes, setVotes] = useState([]);
-  const [myVotes, setMyVotes] = useState([]);
+  const [predicts, setPredicts] = useState([]);
+  const [myPredicts, setMyPredicts] = useState([]);
 
   const fetchData = useCallback(() => {
-    fetch("/api/votes/")
+    fetch("/api/predictions/")
       .then(response => {
         if (!response.ok) {
           throw new Error(`status ${response.status}`);
@@ -15,12 +15,12 @@ function Vote(props) {
         return response.json();
       })
       .then(json => {
-        setVotes(json)
+        setPredicts(json)
       }).catch(e => {
         console.log(e);
       })
 
-    fetch("/api/votes/mine")
+    fetch("/api/predictions/mine")
       .then(response => {
         if (!response.ok) {
           throw new Error(`status ${response.status}`);
@@ -28,19 +28,15 @@ function Vote(props) {
         return response.json();
       })
       .then(json => {
-        setMyVotes(json)
+        setMyPredicts(json)
       }).catch(e => {
         console.log(e);
       })
   });
 
-
-
-
-
   const handleOnSubmit = (game) => {
     console.log(JSON.stringify({...game}))
-      fetch("/api/vote", {
+      fetch("/api/predict", {
             method: "POST",
             headers: {
                 'Accept': 'application/json',
@@ -55,12 +51,15 @@ function Vote(props) {
   }, []);
 
 
-  return votes.map( function(vote){ 
+  return <div> <h2 className="text-center mb-5">Prediction Page</h2>{predicts.length === 0 ? 
+    <p className="text-center ">Nothing to predict right now</p> 
+    : predicts.map( function(predict){ 
     return (
-        <VoteForm handleOnSubmit={handleOnSubmit} game={vote} isAdmin={props.isAdmin} existingVote={myVotes.filter(v => v.id === vote.id)[0]?.rank}/>
+        <PredictForm handleOnSubmit={handleOnSubmit} game={predict} isAdmin={props.isAdmin} existingPredict={myPredicts.filter(v => v.id === predict.id)[0]?.rank}/>
      );
-    });
+    })}
+    </div>
 
 }
 
-export default Vote;
+export default Predict;

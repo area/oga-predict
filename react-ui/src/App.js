@@ -16,7 +16,7 @@ import Home from './Home'
 import OGAList from './OGAList'
 import AddGame from './AddGame'
 import EditGame from './EditGame'
-import Vote from './Vote'
+import Predict from './Predict'
 import Leaderboard from './Leaderboard'
 
 function App() {
@@ -55,10 +55,9 @@ function App() {
           <Navbar.Toggle aria-controls="basic-navbar-nav" />
           <Navbar.Collapse id="basic-navbar-nav">
             <Nav className="me-auto">
-              <Nav.Link as={Link} to="/">Home</Nav.Link>
               <Nav.Link as={Link} to="/leaderboard">Leaderboard</Nav.Link>
               <Nav.Link as={Link} to="/about">About</Nav.Link>
-              <Nav.Link as={Link} to="/vote">Vote</Nav.Link>
+              <Nav.Link as={Link} to="/predict">Predict</Nav.Link>
               <Nav.Link as={Link} to="/the-list">The List</Nav.Link>
               { isAdmin ? <NavDropdown title="Admin" id="basic-nav-dropdown">
                 <NavDropdown.Item as={Link} to="/game/add">Add Game</NavDropdown.Item>
@@ -72,9 +71,9 @@ function App() {
           </Navbar.Collapse>
         </Container>
       </Navbar>      
-    <div class="row">
-    <div class="col-2" ></div>
-    <div class="text-start col-8">
+    <div className="row">
+    <div className="col-2" ></div>
+    <div className="text-start col-8">
 
       {/* A <Routes> looks through its children <Route>s and
           renders the first one that matches the current URL. */}
@@ -95,7 +94,7 @@ function App() {
         <Route path="/game/edit/:id" element={<EditGame isAdmin={isAdmin}/>} />
       </Routes>       
       <Routes>
-        <Route path="/vote" element={<Vote isAdmin={isAdmin}/>} />
+        <Route path="/predict" element={<Predict isAdmin={isAdmin}/>} />
       </Routes>  
       <Routes>
         <Route path="/leaderboard" element={<Leaderboard />} />

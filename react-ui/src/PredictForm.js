@@ -4,20 +4,20 @@ import {
   Link
 } from "react-router-dom";
 
-const VoteForm = (props) => {
+const PredictForm = (props) => {
   console.log(props)
 
   const [game, setGame] = useState({
     name: "",
-    rank: props.existingVote
+    rank: props.existingPredict,
   });
 
   useEffect(() =>{
-    setGame({ ...props.game, rank: props.existingVote} || {
+    setGame({ ...props.game, rank: props.existingPredict} || {
     name: "",
     id: ""
   })
-  }, [props.game, props.existingVote])
+  }, [props.game, props.existingPredict])
 
   const [errorMsg, setErrorMsg] = useState('');
   const { name, rank, id } = game;
@@ -66,10 +66,10 @@ const VoteForm = (props) => {
   return (
     <div className="main-form">
       {errorMsg && <p className="errorMsg">{errorMsg}</p>}
-      Voting on {name} {props.isAdmin ? <Link to={`/game/edit/${id}`}>Edit game</Link> : ""}
+      <img style={{"marginRight":"20px"}} src={props.game.coverURL} alt="Cover" /> Predicting the rank of <b>{name}</b> {props.isAdmin ? <Link to={`/game/edit/${id}`}>Edit game</Link> : ""}
       <Form onSubmit={handleOnSubmit}>
         <Form.Group controlId="rank">
-          <Form.Label>Rank</Form.Label>
+          <Form.Label>Predicted Rank</Form.Label>
           <Form.Control
             className="input-control"
             type="number"
@@ -87,4 +87,4 @@ const VoteForm = (props) => {
   );
 };
 
-export default VoteForm;
+export default PredictForm;
