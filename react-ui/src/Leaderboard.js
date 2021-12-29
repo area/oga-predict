@@ -1,12 +1,8 @@
 import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import Table from './Table'
-import {
-  Link
-} from "react-router-dom";
 
 function Leaderboard(props) {
 
-  const [loadingData, setLoadingData] = useState(true);
   const columns = useMemo(() => [
     { Header: "Place",
       accessor: "whatever",

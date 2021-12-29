@@ -1,6 +1,5 @@
 import React from 'react';
 
-
 function Users() {
   return ( <React.Fragment><h1 class="text-center">About</h1>
       <h2 class="mt-5">What is this?</h2>

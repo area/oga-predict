@@ -6,7 +6,6 @@ import {
 
 function OGAList(props) {
 
-  const [loadingData, setLoadingData] = useState(true);
   const columns = useMemo(() => [
     {
       accessor: "rank",

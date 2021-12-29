@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, Container} from 'react';
+import React from 'react';
 import cover from './cover.jpg';
 import {
   Link
@@ -6,31 +6,6 @@ import {
 
 
 function Home() {
-  const [message, setMessage] = useState(null);
-  const [url] = useState('/api');
-  const [isFetching, setIsFetching] = useState(false);
-  const fetchData = useCallback(() => {
-    fetch(url)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`status ${response.status}`);
-        }
-        return response.json();
-      })
-      .then(json => {
-        setMessage(json.message);
-        setIsFetching(false);
-      }).catch(e => {
-        setMessage(`API call failed: ${e}`);
-        setIsFetching(false);
-      })
-  }, [url]);
-
-  useEffect(() => {
-    setIsFetching(true);
-    fetchData();
-  }, [fetchData]);
-
   return  (
     <div class="p-5 mb-4 bg-dark rounded-3">
       <div class="container-fluid py-5">

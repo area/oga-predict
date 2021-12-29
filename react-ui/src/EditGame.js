@@ -14,7 +14,6 @@ const EditGame = () => {
         if (!response.ok) {
           throw new Error(`status ${response.status}`);
         }
-        console.log(response)
         return response.json();
       })
       .then(json => {

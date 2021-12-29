@@ -29,7 +29,7 @@ const PredictForm = (props) => {
 
     const allFieldsFilled = values.every((field) => {
       const value = `${field}`.trim();
-      return value !== '' && value != 0;
+      return value !== '' && value !== 0;
     });
 
     if (allFieldsFilled) {
