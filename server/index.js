@@ -159,15 +159,6 @@ async function main() {
       const isAdmin = await isUserAdmin(req.session.discordid);
       if (!isAdmin) { return res.status(400).send() }
 
-      // Increment rank of game tied for rank and all later games, if nonzero rank
-      // (i.e. if it's being added directly and we're not voting)
-      if (req.body.rank !== 0) {
-        const data = await pool.query("SELECT id,rank from games WHERE rank >= $1", [req.body.rank]);
-        for (let game of data.rows){
-          await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + 1, game.id])
-        }
-      }
-
       let coverURL;
       if (req.body.igdbid){
         const igdbResult = await igdbClient.fields('url').where(`game=${req.body.igdbid}`).request('/covers')
@@ -176,6 +167,17 @@ async function main() {
       // Add game
       await pool.query("INSERT INTO games (episodeid, name, rank, originalrank, igdbid, coverurl) VALUES ($1, $2, $3, $4, $5, $6)", [req.body.episodeid, req.body.name, req.body.rank, req.body.rank, req.body.igdbid, coverURL])
 
+      // Increment rank of game tied for rank and all later games, if nonzero rank
+      // (i.e. if it's being added directly and we're not voting)
+      if (req.body.rank !== "0") {
+        // This idgb at the end is a bit of a kludge... but works.
+        const data = await pool.query("SELECT id,rank from games WHERE rank >= $1 AND rank != 0 AND igdbid != $2", [req.body.rank, req.body.igdbid]);
+        for (let game of data.rows){
+          await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + 1, game.id])
+        }
+      }
+
+      // Populate episode information
       let feed = await parser.parseURL('https://feed.podbean.com/oldgamersalmanac/feed.xml');
 
       const episode = feed.items.filter(item => {
@@ -190,6 +192,8 @@ async function main() {
     }));
 
     function between(t, l1, l2){
+      l1 = parseInt(l1)
+      l2 = parseInt(l2)
       const lower = Math.min(l1,l2);
       const upper = Math.max(l1,l2);
       return lower <= parseInt(t) && parseInt(t) <= upper;
@@ -209,16 +213,17 @@ async function main() {
       data = await pool.query("SELECT rank, id FROM games WHERE id != $1 AND rank != 0", [req.params.id]);
       games = data.rows;
 
-      data = await pool.query("SELECT prediction, discordid, gameid FROM predictions");
+      // Get all predictions not about this game
+      data = await pool.query("SELECT prediction, discordid, gameid FROM predictions where gameid != $1", [req.params.id]);
       const predictions = data.rows;
 
-      if (req.body.rank === 0 && oldRank !== 0 ){
+      if (req.body.rank === "0" && oldRank !== 0 ){
         //Then we're removing it from the list and opening a prediction...
         // All games lower move up one rank.
         for (let game of games) {
           if (parseInt(game.rank) > parseInt(oldRank)) {
             // Move the game
-            await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank - 1, game.gameid])
+            await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank - 1, game.id])
           }
         }
         // All predictions for a lower slot move up one rank
@@ -228,13 +233,13 @@ async function main() {
             await pool.query("UPDATE predictions SET prediction=$1 WHERE gameid = $2 AND discordid = $3", [prediction.prediction - 1, prediction.gameid, prediction.discordid])
           }
         }
-      } else if (req.body.rank !== 0 && oldRank === 0 ){
+      } else if (req.body.rank !== "0" && oldRank === 0 ){
         // Then we closed a prediction and inserting it in to the list.
         // All games lower move down one rank.
         for (let game of games) {
           if (parseInt(game.rank) >= parseInt(req.body.rank)) {
             // Move the game
-            await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + 1, game.gameid])
+            await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + 1, game.id])
           }
         }
         // All predictions for a lower slot move down one
@@ -313,7 +318,6 @@ async function main() {
 
       // Is gameID Voting?
       let data = await pool.query("SELECT rank FROM games WHERE id = $1", [req.body.id]);
-      console.log(data)
       if (data.rows.length === 0) { return res.status(404).send() }
       let oldRank = data.rows[0].rank;
       if (oldRank !== 0 ) { return res.status(404).send() }
