@@ -144,8 +144,7 @@ async function main() {
         await client.query(`INSERT INTO users (discordId, uniqueName, avatar) VALUES ($1,$2,$3) ON CONFLICT (discordId) DO UPDATE SET (uniqueName, avatar) = ($2,$3)`,[json.id, `${json.username}#${json.discriminator}`, json.avatar])
       }
       const isAdmin = await isUserAdmin(json.id);
-
-      res.send({...json, admin: isAdmin === "true" })
+      res.send({...json, admin: isAdmin === true })
     }));
 
     app.get('/api/games', catchAsync(async (req, res) => {
@@ -394,7 +393,7 @@ async function main() {
     }
 
     async function isUserAdmin(discordId){
-      const data = await client.query(`SELECT admin from users WHERE discordid='${discordId}'`);
+      const data = await client.query(`SELECT admin FROM users WHERE discordid='${discordId}'`);
       return data.rows[0]?.admin === true;
     }
 
