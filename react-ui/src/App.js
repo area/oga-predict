@@ -94,7 +94,7 @@ function App() {
         <Route path="/game/edit/:id" element={<EditGame isAdmin={isAdmin}/>} />
       </Routes>       
       <Routes>
-        <Route path="/predict" element={<Predict isAdmin={isAdmin}/>} />
+        <Route path="/predict" element={<Predict isAdmin={isAdmin} username={username}/>} />
       </Routes>  
       <Routes>
         <Route path="/leaderboard" element={<Leaderboard />} />

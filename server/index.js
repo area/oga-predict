@@ -205,9 +205,12 @@ async function main() {
       if (data.rows.length === 0) { return res.status(404).send() }
       let oldRank = data.rows[0].rank;
 
-      // Get all other games
-      data = await pool.query("SELECT rank, id FROM games WHERE id != $1", [req.params.id]);
+      // Get all other games that aren't being voted on
+      data = await pool.query("SELECT rank, id FROM games WHERE id != $1 AND rank != 0", [req.params.id]);
       games = data.rows;
+
+      data = await pool.query("SELECT prediction, discordid, gameid FROM predictions");
+      const predictions = data.rows;
 
       if (req.body.rank === 0 && oldRank !== 0 ){
         //Then we're removing it from the list and opening a prediction...
@@ -218,6 +221,13 @@ async function main() {
             await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank - 1, game.gameid])
           }
         }
+        // All predictions for a lower slot move up one rank
+        for (let prediction of predictions) {
+          if (parseInt(prediction.prediction) > parseInt(oldRank)) {
+            // Move the prediction
+            await pool.query("UPDATE predictions SET prediction=$1 WHERE gameid = $2 AND discordid = $3", [prediction.prediction - 1, prediction.gameid, prediction.discordid])
+          }
+        }
       } else if (req.body.rank !== 0 && oldRank === 0 ){
         // Then we closed a prediction and inserting it in to the list.
         // All games lower move down one rank.
@@ -225,6 +235,13 @@ async function main() {
           if (parseInt(game.rank) >= parseInt(req.body.rank)) {
             // Move the game
             await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + 1, game.gameid])
+          }
+        }
+        // All predictions for a lower slot move down one
+        for (let prediction of predictions) {
+          if (parseInt(prediction.prediction) >= parseInt(oldRank)) {
+            // Move the prediction
+            await pool.query("UPDATE predictions SET prediction=$1 WHERE gameid = $2 AND discordid = $3", [prediction.prediction - 1, prediction.gameid, prediction.discordid])
           }
         }
       } else {
@@ -237,6 +254,13 @@ async function main() {
           if (between(game.rank, req.body.rank, oldRank)){
             // Move the game
             await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + increment, game.id])
+          }
+        }
+        // Same for predictions
+        for (let prediction of predictions) {
+          if (between(prediction.prediction, req.body.rank, oldRank)) {
+            // Move the prediction
+            await pool.query("UPDATE predictions SET prediction=$1 WHERE gameid = $2 AND discordid = $3", [prediction.prediction + increment, prediction.gameid, prediction.discordid])
           }
         }
       }

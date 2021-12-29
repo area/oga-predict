@@ -51,14 +51,16 @@ function Predict(props) {
   }, []);
 
 
-  return <div> <h2 className="text-center mb-5">Prediction Page</h2>{predicts.length === 0 ? 
+  return <div> <h2 className="text-center mb-5">Prediction Page</h2>
+  { props.username ? "" : <p>You need to be logged in to take part, but you can see what's currently under consideration!</p>}
+  {predicts.length === 0 ? 
     <p className="text-center ">Nothing to predict right now</p> 
     : predicts.map( function(predict){ 
     return (
-        <PredictForm handleOnSubmit={handleOnSubmit} game={predict} isAdmin={props.isAdmin} existingPredict={myPredicts.filter(v => v.gameid === predict.id)[0]?.prediction}/>
+        <PredictForm handleOnSubmit={handleOnSubmit} game={predict} isAdmin={props.isAdmin} username={props.username} existingPredict={myPredicts.filter(v => v.gameid === predict.id)[0]?.prediction}/>
      );
     })}
-    </div>
+    </div> 
 
 }
 
