@@ -11,7 +11,7 @@ let Parser = require('rss-parser');
 let parser = new Parser();
 const igdb = require('igdb-api-node').default;
 let igdbClient;
-const { Client } = require('pg')
+const { Client, Pool } = require('pg')
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -19,6 +19,8 @@ const postgresOptions = {connectionString: process.env.DATABASE_URL};
 if (!isDev){
   postgresOptions.ssl = { rejectUnauthorized: false }
 } 
+
+const pool = new Pool(postgresOptions);
 
 const PORT = process.env.PORT || 5000;
 const bodyParser = require('body-parser');
@@ -38,7 +40,7 @@ async function main() {
     });
 
   } else {
-    const client = new Client(postgresOptions)
+    // const client = new Client(postgresOptions)
 
     // Get twitch token for igdb
     const twitchResponse = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${process.env.TWITCH_CLIENT_ID}&client_secret=${process.env.TWITCH_CLIENT_SECRET}&grant_type=client_credentials`,{method: "POST"});
@@ -51,7 +53,7 @@ async function main() {
     const app = express();
     app.use(bodyParser.json());
 
-    await client.connect()
+    // await client.connect()
     await setupDb()
 
     const CLIENT_ID = process.env.CLIENT_ID;
@@ -61,7 +63,7 @@ async function main() {
     var sess = {
       secret: process.env.SESSION_SECRET,
       cookie: {},
-      store:new (require('connect-pg-simple')(session))({"conObject": postgresOptions, "createTableIfMissing": true}), // DATABASE_URL is postgres, this will work
+      store:new (require('connect-pg-simple')(session))({"pool": pool, "createTableIfMissing": true}), // DATABASE_URL is postgres, this will work
     }
 
     if (app.get('env') === 'production') {
@@ -78,11 +80,11 @@ async function main() {
     }
 
     // If no data, add some games
-    let res = await client.query("SELECT COUNT(1) FROM games");
+    let res = await pool.query("SELECT COUNT(1) FROM games");
     if (res.rows[0].count === "0") {
       // Add some starting data
-      await client.query("INSERT INTO games (episodeId, name, rank, originalRank, igdbid) VALUES ('1', 'Super Mario Bros. 3', '1', '1', '1068')")
-      await client.query("INSERT INTO games (episodeId, name, rank, originalRank) VALUES ('2', 'Hyper Light Drifter', '2', '2')")
+      await pool.query("INSERT INTO games (episodeId, name, rank, originalRank, igdbid) VALUES ('1', 'Super Mario Bros. 3', '1', '1', '1068')")
+      await pool.query("INSERT INTO games (episodeId, name, rank, originalRank) VALUES ('2', 'Hyper Light Drifter', '2', '2')")
     }
 
     app.use(session(sess))
@@ -141,14 +143,14 @@ async function main() {
       const json = await response.json();
       if (json.id){
         req.session.discordid = json.id;
-        await client.query(`INSERT INTO users (discordId, uniqueName, avatar) VALUES ($1,$2,$3) ON CONFLICT (discordId) DO UPDATE SET (uniqueName, avatar) = ($2,$3)`,[json.id, `${json.username}#${json.discriminator}`, json.avatar])
+        await pool.query(`INSERT INTO users (discordId, uniqueName, avatar) VALUES ($1,$2,$3) ON CONFLICT (discordId) DO UPDATE SET (uniqueName, avatar) = ($2,$3)`,[json.id, `${json.username}#${json.discriminator}`, json.avatar])
       }
       const isAdmin = await isUserAdmin(json.id);
       res.send({...json, admin: isAdmin === true })
     }));
 
     app.get('/api/games', catchAsync(async (req, res) => {
-      const data = await client.query("SELECT games.id as gameid, rank, name, games.episodeid, coverURL, igdbid, episodes.url as episodeurl FROM games LEFT JOIN episodes ON games.episodeid = episodes.id ORDER BY games.rank ASC");
+      const data = await pool.query("SELECT games.id as gameid, rank, name, games.episodeid, coverURL, igdbid, episodes.url as episodeurl FROM games LEFT JOIN episodes ON games.episodeid = episodes.id ORDER BY games.rank ASC");
       res.send(data.rows);
     }));
 
@@ -160,9 +162,9 @@ async function main() {
       // Increment rank of game tied for rank and all later games, if nonzero rank
       // (i.e. if it's being added directly and we're not voting)
       if (req.body.rank !== 0) {
-        const data = await client.query("SELECT id,rank from games WHERE rank >= $1", [req.body.rank]);
+        const data = await pool.query("SELECT id,rank from games WHERE rank >= $1", [req.body.rank]);
         for (let game of data.rows){
-          await client.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + 1, game.id])
+          await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + 1, game.id])
         }
       }
 
@@ -172,7 +174,7 @@ async function main() {
         coverURL = `https:${igdbResult.data[0].url.replace('thumb','cover_small')}`;
       }
       // Add game
-      await client.query("INSERT INTO games (episodeid, name, rank, originalrank, igdbid, coverurl) VALUES ($1, $2, $3, $4, $5, $6)", [req.body.episodeid, req.body.name, req.body.rank, req.body.rank, req.body.igdbid, coverURL])
+      await pool.query("INSERT INTO games (episodeid, name, rank, originalrank, igdbid, coverurl) VALUES ($1, $2, $3, $4, $5, $6)", [req.body.episodeid, req.body.name, req.body.rank, req.body.rank, req.body.igdbid, coverURL])
 
       res.send("");
     }));
@@ -189,12 +191,12 @@ async function main() {
       if (!isAdmin) { return res.status(403).send() }
 
       // Does id exist?
-      let data = await client.query("SELECT rank FROM games WHERE id = $1", [req.params.id]);
+      let data = await pool.query("SELECT rank FROM games WHERE id = $1", [req.params.id]);
       if (data.rows.length === 0) { return res.status(404).send() }
       let oldRank = data.rows[0].rank;
 
       // Get all other games
-      data = await client.query("SELECT rank, id FROM games WHERE id != $1", [req.params.id]);
+      data = await pool.query("SELECT rank, id FROM games WHERE id != $1", [req.params.id]);
       games = data.rows;
 
       if (req.body.rank === 0 && oldRank !== 0 ){
@@ -203,7 +205,7 @@ async function main() {
         for (let game of games) {
           if (parseInt(game.rank) > parseInt(oldRank)) {
             // Move the game
-            await client.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank - 1, game.gameid])
+            await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank - 1, game.gameid])
           }
         }
       } else if (req.body.rank !== 0 && oldRank === 0 ){
@@ -212,7 +214,7 @@ async function main() {
         for (let game of games) {
           if (parseInt(game.rank) >= parseInt(req.body.rank)) {
             // Move the game
-            await client.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + 1, game.gameid])
+            await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + 1, game.gameid])
           }
         }
       } else {
@@ -224,7 +226,7 @@ async function main() {
         for (let game of games) {
           if (between(game.rank, req.body.rank, oldRank)){
             // Move the game
-            await client.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + increment, game.id])
+            await pool.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + increment, game.id])
           }
         }
       }
@@ -235,7 +237,7 @@ async function main() {
         coverURL = `https:${igdbResult.data[0].url.replace('thumb','cover_small')}`;
       }
       // Add game
-      await client.query("UPDATE games SET (episodeid, name, rank, originalrank, igdbid, coverurl) = ($1, $2, $3, $4, $5, $6) WHERE id = $7", [req.body.episodeid, req.body.name, req.body.rank, req.body.rank, req.body.igdbid, coverURL, req.params.id])
+      await pool.query("UPDATE games SET (episodeid, name, rank, originalrank, igdbid, coverurl) = ($1, $2, $3, $4, $5, $6) WHERE id = $7", [req.body.episodeid, req.body.name, req.body.rank, req.body.rank, req.body.igdbid, coverURL, req.params.id])
 
       let feed = await parser.parseURL('https://feed.podbean.com/oldgamersalmanac/feed.xml');
 
@@ -244,14 +246,14 @@ async function main() {
       })[0];
 
       if (episode){
-        await client.query(`INSERT INTO episodes (id, url) VALUES ($1,$2) ON CONFLICT (id) DO UPDATE SET url = $2`, [req.params.id, episode.link])
+        await pool.query(`INSERT INTO episodes (id, url) VALUES ($1,$2) ON CONFLICT (id) DO UPDATE SET url = $2`, [req.params.id, episode.link])
       }
 
       // Did we just close a predict?
       if (oldRank === 0 && req.body.rank !== 0){
         let nonZeroCount = games.filter(x => x.rank != 0).length + 1; // We are now in the list, but not in games which exluded ourselves
 
-        await client.query("UPDATE games SET (predictclosedtimestamp, originalrank, originallistsize) = ($1, $2, $3) WHERE id = $4", [Math.floor(new Date(episode.isoDate).getTime()/1000), req.body.rank, nonZeroCount, req.params.id])
+        await pool.query("UPDATE games SET (predictclosedtimestamp, originalrank, originallistsize) = ($1, $2, $3) WHERE id = $4", [Math.floor(new Date(episode.isoDate).getTime()/1000), req.body.rank, nonZeroCount, req.params.id])
 
       }
 
@@ -260,12 +262,12 @@ async function main() {
 
     app.get('/api/games/:id', catchAsync(async (req, res) => {
       // Does id exist?
-      let data = await client.query("SELECT * FROM games WHERE id = $1", [req.params.id]);
+      let data = await pool.query("SELECT * FROM games WHERE id = $1", [req.params.id]);
       res.send(data.rows[0])
     }));
 
     app.get('/api/predictions', catchAsync(async (req, res) => {
-      let data = await client.query("SELECT * FROM games WHERE rank = 0");
+      let data = await pool.query("SELECT * FROM games WHERE rank = 0");
       res.send(data.rows)
     }));
 
@@ -276,7 +278,7 @@ async function main() {
       if (!discordId) { return res.status(400).send() }
 
       // Is gameID Voting?
-      let data = await client.query("SELECT rank FROM games WHERE id = $1", [req.body.id]);
+      let data = await pool.query("SELECT rank FROM games WHERE id = $1", [req.body.id]);
       console.log(data)
       if (data.rows.length === 0) { return res.status(404).send() }
       let oldRank = data.rows[0].rank;
@@ -284,7 +286,7 @@ async function main() {
 
       // Record predict for user
       // Record game id, timestamp, predicted rank
-      await client.query(`INSERT INTO predictions (discordid, gameid, prediction, timestamp) VALUES ($1,$2,$3,$4) ON CONFLICT (discordid, gameid) DO UPDATE SET (prediction, timestamp) = ($3, $4)`, [discordId, req.body.id, req.body.rank, Math.floor(Date.now()/1000)])
+      await pool.query(`INSERT INTO predictions (discordid, gameid, prediction, timestamp) VALUES ($1,$2,$3,$4) ON CONFLICT (discordid, gameid) DO UPDATE SET (prediction, timestamp) = ($3, $4)`, [discordId, req.body.id, req.body.rank, Math.floor(Date.now()/1000)])
 
       res.send("");
     }));
@@ -294,14 +296,14 @@ async function main() {
       const discordId = req.session.discordid;
       if (!discordId) { return res.status(400).send() }
 
-      let data = await client.query("SELECT * FROM predictions WHERE discordid = $1", [req.session.discordid])
+      let data = await pool.query("SELECT * FROM predictions WHERE discordid = $1", [req.session.discordid])
       res.send(data.rows)
     }));
 
     app.get('/api/leaderboard', catchAsync(async (req, res) => {
 
       // Get predictions
-      let data = await client.query("SELECT predictions.discordid, predictions.prediction, predictions.timestamp, games.originalrank, games.predictclosedtimestamp, games.originallistsize FROM predictions INNER JOIN games ON predictions.gameid = games.id")
+      let data = await pool.query("SELECT predictions.discordid, predictions.prediction, predictions.timestamp, games.originalrank, games.predictclosedtimestamp, games.originallistsize FROM predictions INNER JOIN games ON predictions.gameid = games.id")
       //For each prediction, work out the score, and add to an array for the corresponding user.
       const users = {}
       data.rows.forEach(prediction => {
@@ -313,12 +315,12 @@ async function main() {
         users[prediction.discordid] = [score].concat(users[prediction.discordid] )
       })
 
-      data = await client.query("SELECT COUNT(1) FROM games WHERE rank != 0");
+      data = await pool.query("SELECT COUNT(1) FROM games WHERE rank != 0");
       const currentListSize = data.rows[0].count
 
 
       let leaderboard = await Promise.all(Object.keys(users).map(async (userid) => {
-        const data = await client.query("SELECT * FROM users WHERE discordid = $1", [userid]);
+        const data = await pool.query("SELECT * FROM users WHERE discordid = $1", [userid]);
         const userdata = data.rows[0]
         const scores = users[userid].filter(x => x !==Infinity)
         let score;
@@ -352,7 +354,7 @@ async function main() {
 
     async function setupDb(){
       // Predictions
-      await client.query(`CREATE TABLE IF NOT EXISTS predictions (
+      await pool.query(`CREATE TABLE IF NOT EXISTS predictions (
         discordid text NOT NULL,
         gameid int NOT NULL,
         prediction int NOT NULL,
@@ -363,7 +365,7 @@ async function main() {
 
       // //Games
       // gameid episodeid name rank originalRank originalListSize predictCloseTimestamp coverURL igdbid 
-      await client.query(`CREATE TABLE IF NOT EXISTS games (
+      await pool.query(`CREATE TABLE IF NOT EXISTS games (
         id SERIAL PRIMARY KEY,
         episodeid int,
         name text NOT NULL,
@@ -377,14 +379,14 @@ async function main() {
 
       // //Episodes
       // episodeid episodeLink
-      await client.query(`CREATE TABLE IF NOT EXISTS episodes (
+      await pool.query(`CREATE TABLE IF NOT EXISTS episodes (
         id int NOT NULL PRIMARY KEY,
         url text
       );`);
 
       // //Users
       // discordId  admin uniqueName avatar
-      await client.query(`CREATE TABLE IF NOT EXISTS users (
+      await pool.query(`CREATE TABLE IF NOT EXISTS users (
         discordid text NOT NULL PRIMARY KEY,
         admin bool,
         uniquename text,
@@ -393,12 +395,12 @@ async function main() {
     }
 
     async function isUserAdmin(discordId){
-      const data = await client.query(`SELECT admin FROM users WHERE discordid='${discordId}'`);
+      const data = await pool.query(`SELECT admin FROM users WHERE discordid='${discordId}'`);
       return data.rows[0]?.admin === true;
     }
 
     async function setUserAdmin(discordId, state){
-      const res = await client.query(`INSERT INTO users (discordid, admin) VALUES ($1,$2) ON CONFLICT (discordid) DO UPDATE SET admin = $2`, [discordId, state])
+      const res = await pool.query(`INSERT INTO users (discordid, admin) VALUES ($1,$2) ON CONFLICT (discordid) DO UPDATE SET admin = $2`, [discordId, state])
     }
   }
 
