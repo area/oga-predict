@@ -143,7 +143,7 @@ async function main() {
     }));
 
     app.get('/api/games', catchAsync(async (req, res) => {
-      const data = await client.query("SELECT games.id as gameid, rank, name, games.episodeid, coverURL, igdbid, episodes.url as episodeurl FROM games LEFT JOIN episodes ON games.episodeid = episodes.id");
+      const data = await client.query("SELECT games.id as gameid, rank, name, games.episodeid, coverURL, igdbid, episodes.url as episodeurl FROM games LEFT JOIN episodes ON games.episodeid = episodes.id ORDER BY games.rank ASC");
       res.send(data.rows);
     }));
 
@@ -219,7 +219,7 @@ async function main() {
         for (let game of games) {
           if (between(game.rank, req.body.rank, oldRank)){
             // Move the game
-            await client.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + increment, game.gameid])
+            await client.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + increment, game.id])
           }
         }
       }
