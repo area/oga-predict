@@ -66,7 +66,7 @@ const PredictForm = (props) => {
   return (
     <div className="main-form">
       {errorMsg && <p className="errorMsg">{errorMsg}</p>}
-      <img style={{"marginRight":"20px"}} src={props.game.coverURL} alt="Cover" /> Predicting the rank of <b>{name}</b> {props.isAdmin ? <Link to={`/game/edit/${id}`}>Edit game</Link> : ""}
+      <img style={{"marginRight":"20px"}} src={props.game.coverurl} alt="Cover" /> Predicting the rank of <b>{name}</b> {props.isAdmin ? <Link to={`/game/edit/${id}`}>Edit game</Link> : ""}
       <Form onSubmit={handleOnSubmit}>
         <Form.Group controlId="rank">
           <Form.Label>Predicted Rank</Form.Label>

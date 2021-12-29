@@ -18,19 +18,19 @@ function OGAList(props) {
     {
       accessor: "cover",
       Cell: ({ value, row }) => {
-        return (<React.Fragment><img style={{"marginRight":"20px"}} src={row.original.coverURL} alt="Cover" /></React.Fragment>)
+        return (<React.Fragment><img style={{"marginRight":"20px"}} src={row.original.coverurl} alt="Cover" /></React.Fragment>)
       }
     },
     {
       accessor: "name",
       Cell: ({ value, row }) => {
-        return (<React.Fragment>{value}{props.isAdmin ? <React.Fragment> | <Link to={`/game/edit/${row.original.id}`}>Edit</Link></React.Fragment> : ""}</React.Fragment>)
+        return (<React.Fragment>{value}{props.isAdmin ? <React.Fragment> | <Link to={`/game/edit/${row.original.gameid}`}>Edit</Link></React.Fragment> : ""}</React.Fragment>)
       }
     },
     { 
       accessor: "episode",
       Cell: ({ value, row }) => {
-        return ( <a href={row.original.episodeLink}>Episode {value}</a>)
+        return ( <a href={row.original.episodeurl}>Episode {row.original.episodeid}</a>)
       }
 
     }

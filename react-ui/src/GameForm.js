@@ -18,11 +18,11 @@ const GameForm = (props) => {
   }, [props.game])
 
   const [errorMsg, setErrorMsg] = useState('');
-  const { name, rank, episode, igdbId } = game;
+  const { name, rank, episodeid, igdbid } = game;
 
   const handleOnSubmit = (event) => {
     event.preventDefault();
-    const values = [name, rank, episode, igdbId];
+    const values = [name, rank, episodeid, igdbid];
     let errorMsg = '';
 
     const allFieldsFilled = values.every((field) => {
@@ -32,7 +32,7 @@ const GameForm = (props) => {
 
     if (allFieldsFilled) {
       const game = {
-        name, rank, episode, igdbId
+        name, rank, episodeid, igdbid
       };
       props.handleOnSubmit(game);
     } else {
@@ -87,24 +87,24 @@ const GameForm = (props) => {
             onChange={handleInputChange}
           />
         </Form.Group>
-        <Form.Group controlId="episode">
+        <Form.Group controlId="episodeid">
           <Form.Label>Episode</Form.Label>
           <Form.Control
             className="input-control"
             type="number"
-            name="episode"
-            value={episode}
+            name="episodeid"
+            value={episodeid}
             placeholder="Enter episode game reviewed"
             onChange={handleInputChange}
           />
         </Form.Group>
-        <Form.Group controlId="igdbId">
+        <Form.Group controlId="igdbid">
           <Form.Label>IGDB Id</Form.Label>
           <Form.Control
             className="input-control"
             type="number"
-            name="igdbId"
-            value={igdbId}
+            name="igdbid"
+            value={igdbid}
             placeholder="Enter IGDB id"
             onChange={handleInputChange}
           />

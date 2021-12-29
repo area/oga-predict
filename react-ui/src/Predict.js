@@ -55,7 +55,7 @@ function Predict(props) {
     <p className="text-center ">Nothing to predict right now</p> 
     : predicts.map( function(predict){ 
     return (
-        <PredictForm handleOnSubmit={handleOnSubmit} game={predict} isAdmin={props.isAdmin} existingPredict={myPredicts.filter(v => v.id === predict.id)[0]?.rank}/>
+        <PredictForm handleOnSubmit={handleOnSubmit} game={predict} isAdmin={props.isAdmin} existingPredict={myPredicts.filter(v => v.gameid === predict.id)[0]?.prediction}/>
      );
     })}
     </div>

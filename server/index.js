@@ -7,21 +7,15 @@ const numCPUs = require('os').cpus().length;
 const btoa = require('btoa');
 const fetch = require('node-fetch');
 var session = require('express-session')
-const createClient = require('redis').createClient;
-const createClient3 = require('redis3').createClient;
-const connectRedis = require('connect-redis');
 let Parser = require('rss-parser');
 let parser = new Parser();
 const igdb = require('igdb-api-node').default;
 let igdbClient;
-
-const redis = createClient({
-  url: process.env.REDIS_URL || "redis://127.0.0.1:6379",
-});
+const { Client } = require('pg')
+const client = new Client({connectionString: process.env.DATABASE_URL})
 
 const isDev = process.env.NODE_ENV !== 'production';
 const PORT = process.env.PORT || 5000;
-const RedisStore = connectRedis(session);
 const bodyParser = require('body-parser');
 
 async function main() {
@@ -51,8 +45,8 @@ async function main() {
     const app = express();
     app.use(bodyParser.json());
 
-    redis.on('error', (err) => console.log('Redis Client Error', err));
-    await redis.connect();
+    await client.connect()
+    await setupDb()
 
     const CLIENT_ID = process.env.CLIENT_ID;
     const CLIENT_SECRET = process.env.CLIENT_SECRET;
@@ -61,9 +55,7 @@ async function main() {
     var sess = {
       secret: process.env.SESSION_SECRET,
       cookie: {},
-      store: new RedisStore({ client: createClient3({
-        url: process.env.REDIS_URL || "redis://127.0.0.1:6379",
-      }) }),
+      store:new (require('connect-pg-simple')(session))({"createTableIfMissing": true}), // DATABASE_URL is postgres, this will work
     }
 
     if (app.get('env') === 'production') {
@@ -73,30 +65,18 @@ async function main() {
 
     // Award first admin rights if necessary
     if (process.env.ADMIN){
-      const isAdmin = await redis.hGet("user:" + process.env.ADMIN, "admin")
+      const isAdmin = await isUserAdmin(process.env.ADMIN);
       if (!isAdmin) {
-        await redis.hSet("user:" + process.env.ADMIN, "admin", "true");
+        await setUserAdmin(process.env.ADMIN, true);
       }
     }
 
-
-    const gameId = await redis.get('gameId')
-    if (!gameId) {
-      await redis.hSet(`game:1`, "episode", "1");
-      await redis.hSet(`game:1`, "name", "Super Mario Bros. 3");
-      await redis.hSet(`game:1`, "rank", "1");
-      await redis.hSet(`game:1`, "originalRank", "1");
-      
-
-      await redis.hSet(`game:2`, "episode", "2");
-      await redis.hSet(`game:2`, "name", "Hyper Light Drifter");
-      await redis.hSet(`game:2`, "rank", "2");
-      await redis.hSet(`game:1`, "originalRank", "2");
-
-      await redis.sAdd('games', 'game:1');
-      await redis.sAdd('games', 'game:2');
-
-      await redis.set('gameId', "2") 
+    // If no data, add some games
+    let res = await client.query("SELECT COUNT(1) FROM games");
+    if (res.rows[0].count === "0") {
+      // Add some starting data
+      await client.query("INSERT INTO games (episodeId, name, rank, originalRank, igdbid) VALUES ('1', 'Super Mario Bros. 3', '1', '1', '1068')")
+      await client.query("INSERT INTO games (episodeId, name, rank, originalRank) VALUES ('2', 'Hyper Light Drifter', '2', '2')")
     }
 
     app.use(session(sess))
@@ -135,93 +115,59 @@ async function main() {
           body: formData.toString()
         });
       const json = await response.json();
-      await redis.hSet(`session:${req.session.id}`, 'accessToken', json.access_token);
-      await redis.hSet(`session:${req.session.id}`, 'refreshToken', json.refresh_token);
+      req.session.accessToken = json.access_token;
+      req.session.refreshToken = json.refresh_token;
       res.redirect(`/?token=${json.access_token}`);
     }));
 
     app.get('/account', catchAsync(async (req, res) => {
       if (!req.session.id){ return res.send({})}
 
-      const token = await redis.hGet(`session:${req.session.id}`, 'accessToken');
       // TODO: If going to expire, refresh token
       const response = await fetch("https://discord.com/api/users/@me",
       {
         headers: {
-          "Authorization": `Bearer ${token}`,
+          "Authorization": `Bearer ${req.session.accessToken}`,
           'Accept': 'application/json',
           "Content-Type": 'application/json'
         },
       });
       const json = await response.json();
       if (json.id){
-        await redis.hSet(`session:${req.session.id}`, 'discordId', json.id);
-        await redis.hSet(`user:${json.id}`, 'uniqueName', `${json.username}#${json.discriminator}`);
-        await redis.hSet(`user:${json.id}`, 'avatar', `${json.avatar}`);
+        req.session.discordid = json.id;
+        await client.query(`INSERT INTO users (discordId, uniqueName, avatar) VALUES ($1,$2,$3) ON CONFLICT (discordId) DO UPDATE SET (uniqueName, avatar) = ($2,$3)`,[json.id, `${json.username}#${json.discriminator}`, json.avatar])
       }
-      const isAdmin = await redis.hGet("user:" + json.id, "admin")
+      const isAdmin = await isUserAdmin(json.id);
 
       res.send({...json, admin: isAdmin === "true" })
     }));
 
     app.get('/api/games', catchAsync(async (req, res) => {
-      const data = await redis.sendCommand(['SORT', 'games', 'BY', '*->rank', 'get', '*->name', 'get', '*->rank', 'get', '#', 'get', '*->episode', 'get', '*->coverURL', 'get', '*->igdbId', 'get', '*->episodeLink']);
-      const fields  = ["name", "rank", "id", "episode", "coverURL", "igdbId", "episodeLink"] // Needs changing based on above query
-      const nGames = data.length / fields.length ;
-      const games = [];
-      for (let i = 0; i < nGames; i+=1){
-        const offset = i * fields.length;
-        games.push({
-          [fields[0]]: data[offset],
-          [fields[1]]: data[offset+1],
-          [fields[2]]: data[offset+2].split(":")[1],
-          [fields[3]]: data[offset+3],
-          [fields[4]]: data[offset+4],
-          [fields[5]]: data[offset+5],
-          [fields[6]]: data[offset+6],
-        })
-      }
-      res.send(games);
+      const data = await client.query("SELECT games.id as gameid, rank, name, games.episodeid, coverURL, igdbid, episodes.url as episodeurl FROM games LEFT JOIN episodes ON games.episodeid = episodes.id");
+      res.send(data.rows);
     }));
 
     app.post('/api/games', catchAsync(async (req, res) => {
       // Is Admin?
-      const discordId = await redis.hGet(`session:${req.session.id}`, 'discordId');
-      const isAdmin = await redis.hGet("user:" + discordId, "admin")
+      const isAdmin = await isUserAdmin(req.session.discordid);
       if (!isAdmin) { return res.status(400).send() }
-
-      // Get game id
-      const nextGameId = await redis.incr('gameId')
 
       // Increment rank of game tied for rank and all later games, if nonzero rank
       // (i.e. if it's being added directly and we're not voting)
-      if (req.body.rank !== "0") {
-        const data = await redis.sendCommand(['SORT', 'games', 'alpha', 'get', '#', 'get', '*->rank']);
-        const nGames = data.length / 2 ;
-        for (let i = 0; i < nGames; i+=1){
-          const offset = i * 2;
-          const key = data[offset]
-          const rank = data[offset + 1]
-          if (parseInt(req.body.rank) <= parseInt(rank))  {
-            // Move the game down one
-            await redis.hIncrBy(key, "rank", 1);
-          }
+      if (req.body.rank !== 0) {
+        const data = await client.query("SELECT id,rank from games WHERE rank >= $1", [req.body.rank]);
+        for (let game of data.rows){
+          await client.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + 1, game.id])
         }
       }
 
-      // Add game
-      await redis.hSet(`game:${nextGameId}`, "episode", req.body.episode);
-      await redis.hSet(`game:${nextGameId}`, "name", req.body.name);
-      await redis.hSet(`game:${nextGameId}`, "rank", req.body.rank);
-      await redis.hSet(`game:${nextGameId}`, "originalRank", req.body.rank);
-
-      if (req.body.igdbId){
-        await redis.hSet(`game:${nextGameId}`, "igdbId", req.body.igdbId)
-        const igdbResult = await igdbClient.fields('url').where(`game=${req.body.igdbId}`).request('/covers')
-        await redis.hSet(`game:${nextGameId}`, "coverURL", `https:${res.data[0].url.replace('thumb','cover_small')}`)
+      let coverURL;
+      if (req.body.igdbid){
+        const igdbResult = await igdbClient.fields('url').where(`game=${req.body.igdbid}`).request('/covers')
+        coverURL = `https:${igdbResult.data[0].url.replace('thumb','cover_small')}`;
       }
-
-      await redis.sAdd('games', `game:${nextGameId}`);
+      // Add game
+      await client.query("INSERT INTO games (episodeid, name, rank, originalrank, igdbid, coverurl) VALUES ($1, $2, $3, $4, $5, $6)", [req.body.episodeid, req.body.name, req.body.rank, req.body.rank, req.body.igdbid, coverURL])
 
       res.send("");
     }));
@@ -234,47 +180,34 @@ async function main() {
 
     app.post('/api/games/:id', catchAsync(async (req, res) => {
       // Is Admin?
-      const discordId = await redis.hGet(`session:${req.session.id}`, 'discordId');
-      const isAdmin = await redis.hGet("user:" + discordId, "admin")
+      const isAdmin = await isUserAdmin(req.session.discordid);
       if (!isAdmin) { return res.status(403).send() }
 
       // Does id exist?
-      let oldRank = await redis.hGet(`game:${req.params.id}`, "rank")
-      if (!oldRank) { return res.status(404).send() }
+      let data = await client.query("SELECT rank FROM games WHERE id = $1", [req.params.id]);
+      if (data.rows.length === 0) { return res.status(404).send() }
+      let oldRank = data.rows[0].rank;
 
       // Get all other games
-      const data = await redis.sendCommand(['SORT', 'games', 'alpha', 'get', '#', 'get', '*->rank']);
-      // Turn in to games objects
-      const nGames = data.length / 2 ;
-      let games = [];
-      for (let i = 0; i < nGames; i+=1) {
-        const offset = i * 2;
-        games.push({
-          key: data[offset],
-          rank: data[offset + 1]
-        })
-      }
+      data = await client.query("SELECT rank, id FROM games WHERE id != $1", [req.params.id]);
+      games = data.rows;
 
-      // Remove self
-      games = games.filter(game => game.key !== `game:${req.params.id}`);
-
-      if (req.body.rank === "0" && oldRank !=="0" ){
+      if (req.body.rank === 0 && oldRank !== 0 ){
         //Then we're removing it from the list and opening a prediction...
         // All games lower move up one rank.
         for (let game of games) {
           if (parseInt(game.rank) > parseInt(oldRank)) {
             // Move the game
-            await redis.hIncrBy(game.key, "rank", -1);
+            await client.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank - 1, game.gameid])
           }
         }
-      } else if (req.body.rank !== "0" && oldRank === "0" ){
+      } else if (req.body.rank !== 0 && oldRank === 0 ){
         // Then we closed a prediction and inserting it in to the list.
         // All games lower move down one rank.
         for (let game of games) {
           if (parseInt(game.rank) >= parseInt(req.body.rank)) {
             // Move the game
-            console.log(`bump down ${game.key}`)
-            await redis.hIncrBy(game.key, "rank", 1);
+            await client.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + 1, game.gameid])
           }
         }
       } else {
@@ -286,46 +219,35 @@ async function main() {
         for (let game of games) {
           if (between(game.rank, req.body.rank, oldRank)){
             // Move the game
-            await redis.hIncrBy(game.key, "rank", increment);
+            await client.query("UPDATE games SET rank=$1 WHERE id = $2", [game.rank + increment, game.gameid])
           }
         }
       }
 
-      // Set game
-      await redis.hSet(`game:${req.params.id}`, "episode", req.body.episode);
-      await redis.hSet(`game:${req.params.id}`, "name", req.body.name);
-      await redis.hSet(`game:${req.params.id}`, "rank", req.body.rank);
-      await redis.sAdd('games', `game:${req.params.id}`);
-
-      if (req.body.igdbId){
-        await redis.hSet(`game:${req.params.id}`, "igdbId", req.body.igdbId)
-        const igdbResult = await igdbClient.fields('url').where(`game=${req.body.igdbId}`).request('/covers')
-        await redis.hSet(`game:${req.params.id}`, "coverURL", `https:${igdbResult.data[0].url.replace('thumb','cover_small')}`)
+      let coverURL;
+      if (req.body.igdbid){
+        const igdbResult = await igdbClient.fields('url').where(`game=${req.body.igdbid}`).request('/covers')
+        coverURL = `https:${igdbResult.data[0].url.replace('thumb','cover_small')}`;
       }
+      // Add game
+      await client.query("UPDATE games SET (episodeid, name, rank, originalrank, igdbid, coverurl) = ($1, $2, $3, $4, $5, $6) WHERE id = $7", [req.body.episodeid, req.body.name, req.body.rank, req.body.rank, req.body.igdbid, coverURL, req.params.id])
 
       let feed = await parser.parseURL('https://feed.podbean.com/oldgamersalmanac/feed.xml');
 
       const episode = feed.items.filter(item => {
-        return item.itunes.episode === req.body.episode.toString()
+        return item.itunes.episode === req.body.episodeid.toString()
       })[0];
-      await redis.hSet(`game:${req.params.id}`, "episodeLink", episode.link);
 
+      if (episode){
+        await client.query(`INSERT INTO episodes (id, url) VALUES ($1,$2) ON CONFLICT (id) DO UPDATE SET url = $2`, [req.params.id, episode.link])
+      }
 
       // Did we just close a predict?
-      if (oldRank === "0" && req.body.rank !== "0"){
-        await redis.hSet(`game:${req.params.id}`, "predictClosedTimestamp", new Date(episode.isoDate).getTime());
-        await redis.hSet(`game:${req.params.id}`, "originalRank", req.body.rank);
-        let nonZeroCount = 1; // We are now in the list, but not in games which exluded ourselves
-        // How many games have a non-zero rank?
-        for (let i = 0; i < nGames; i+=1) {
-          const offset = i * 2;
-          const rank = data[offset + 1]
-          if (rank !== "0"){
-            nonZeroCount += 1;
-          }
-        }
+      if (oldRank === 0 && req.body.rank !== 0){
+        let nonZeroCount = games.filter(x => x.rank != 0).length + 1; // We are now in the list, but not in games which exluded ourselves
 
-        await redis.hSet(`game:${req.params.id}`, "originalListSize", nonZeroCount);
+        await client.query("UPDATE games SET (predictclosedtimestamp, originalrank, originallistsize) = ($1, $2, $3) WHERE id = $4", [Math.floor(new Date(episode.isoDate).getTime()/1000), req.body.rank, nonZeroCount, req.params.id])
+
       }
 
       res.send("");
@@ -333,117 +255,77 @@ async function main() {
 
     app.get('/api/games/:id', catchAsync(async (req, res) => {
       // Does id exist?
-      const data = await redis.hGet(`game:${req.params.id}`, "rank")
-      if (!data) { return res.status(404).send() }
-
-      // Update ranks for games between old a new position.
-      // Whether rank goes up or down depends on which direction the game is moving
-      const increment = req.body.rank > data ? 1 : -1;
-
-      const game = {};
-
-      // Get game
-      game.episode = await redis.hGet(`game:${req.params.id}`, "episode");
-      game.name = await redis.hGet(`game:${req.params.id}`, "name");
-      game.rank = await redis.hGet(`game:${req.params.id}`, "rank");
-      game.igdbId = await redis.hGet(`game:${req.params.id}`, "igdbId");
-
-      res.send(game);
+      let data = await client.query("SELECT * FROM games WHERE id = $1", [req.params.id]);
+      res.send(data.rows[0])
     }));
 
     app.get('/api/predictions', catchAsync(async (req, res) => {
-      const data = await redis.sendCommand(['SORT', 'games', 'BY', '*->rank', 'get', '*->name', 'get', '*->rank', 'get', '#', 'get', '*->coverURL']);
-      const fields  = ["name", "rank", "id", "coverURL" ] // Needs changing based on above query
-      const nGames = data.length / fields.length ;
-      const games = [];
-      for (let i = 0; i < nGames; i+=1){
-        const offset = i * fields.length;
-        games.push({
-          [fields[0]]: data[offset],
-          [fields[1]]: data[offset+1],
-          [fields[2]]: data[offset+2].split(":")[1],
-          [fields[3]]: data[offset+3],
-        })
-      }
-      res.send(games.filter(game => game.rank === "0"));
+      let data = await client.query("SELECT * FROM games WHERE rank = 0");
+      res.send(data.rows)
     }));
 
 
     app.post('/api/predict', catchAsync(async (req, res) => {
       // Is logged in?
-      const discordId = await redis.hGet(`session:${req.session.id}`, 'discordId');
+      const discordId = req.session.discordid;
       if (!discordId) { return res.status(400).send() }
 
       // Is gameID Voting?
-      let oldRank = await redis.hGet(`game:${req.body.id}`, "rank")
-      if (oldRank !== "0" ) { return res.status(404).send() }
+      let data = await client.query("SELECT rank FROM games WHERE id = $1", [req.body.id]);
+      console.log(data)
+      if (data.rows.length === 0) { return res.status(404).send() }
+      let oldRank = data.rows[0].rank;
+      if (oldRank !== 0 ) { return res.status(404).send() }
 
       // Record predict for user
       // Record game id, timestamp, predicted rank
-      await redis.sAdd(`predictors`, discordId)
-      await redis.sAdd(`${discordId}:predicts`, req.body.id)
-      await redis.hSet(`${discordId}:predict:${req.body.id}`, "timestamp", Date.now())
-      await redis.hSet(`${discordId}:predict:${req.body.id}`, "rank", req.body.rank)
+      await client.query(`INSERT INTO predictions (discordid, gameid, prediction, timestamp) VALUES ($1,$2,$3,$4) ON CONFLICT (discordid, gameid) DO UPDATE SET (prediction, timestamp) = ($3, $4)`, [discordId, req.body.id, req.body.rank, Math.floor(Date.now()/1000)])
 
       res.send("");
     }));
 
     app.get('/api/predictions/mine', catchAsync(async (req, res) => {
       // Is logged in?
-      const discordId = await redis.hGet(`session:${req.session.id}`, 'discordId');
+      const discordId = req.session.discordid;
       if (!discordId) { return res.status(400).send() }
-      const data = await redis.sendCommand(['SORT', `${discordId}:predicts`, 'BY', '*->rank', 'get', '#', 'get', `${discordId}:predict:*->timestamp`, 'get', `${discordId}:predict:*->rank`]);
-      const fields  = ["id", "timestamp", "rank"] // Needs changing based on above query
-      const nGames = data.length / fields.length ;
-      const predicts = [];
-      for (let i = 0; i < nGames; i+=1){
-        const offset = i * fields.length;
-        predicts.push({
-          [fields[0]]: data[offset],
-          [fields[1]]: data[offset+1],
-          [fields[2]]: data[offset+2],
-        })
-      }
 
-      res.send(predicts);
+      let data = await client.query("SELECT * FROM predictions WHERE discordid = $1", [req.session.discordid])
+      res.send(data.rows)
     }));
 
     app.get('/api/leaderboard', catchAsync(async (req, res) => {
-      // Get users who predicted
-      const users = await redis.sMembers("predictors")
-      const data = await redis.sendCommand(['SORT', 'games', 'BY', '*->rank', 'get', '*->rank']);
-      const fields  = ["rank"] // Needs changing based on above query
-      const currentListSize = data.filter(x => x !== "0").length
 
-      // For each user ...
-      let leaderboard = await Promise.all(
-        users.map(async (userid) => {
-          // For each game they predicted for...
-          const gameIds = await redis.sMembers(`${userid}:predicts`)
-          let scores = await Promise.all(gameIds.map(async (gameId) => {
-            // get predict
-            const predict = await redis.hGetAll(`${userid}:predict:${gameId}`);
-            // get actual rank
-            const gameRank = await redis.hGet(`game:${gameId}`, 'originalRank');
-            const gamePredictClosed = await redis.hGet(`game:${gameId}`, 'predictClosedTimestamp');
+      // Get predictions
+      let data = await client.query("SELECT predictions.discordid, predictions.prediction, predictions.timestamp, games.originalrank, games.predictclosedtimestamp, games.originallistsize FROM predictions INNER JOIN games ON predictions.gameid = games.id")
+      //For each prediction, work out the score, and add to an array for the corresponding user.
+      const users = {}
+      data.rows.forEach(prediction => {
+        // Did they vote after the episode released?
+        if (prediction.timestamp > prediction.predictclosedtimestamp) { return; }
 
-            if (predict.timestamp > gamePredictClosed){ return Infinity };
-            const originalListSize = await redis.hGet(`game:${gameId}`, 'originalListSize');
-            return ((predict.rank-gameRank)/originalListSize)**2
-          }))
-          const user = await redis.hGetAll(`user:${userid}`);
-          scores = scores.filter(x => x !==Infinity)
-          let score;
-          if (scores.length === 0){
-            score = Infinity;
-          } else {
-            score = Math.sqrt(scores.reduce((prev, curr) => prev + curr)/scores.length)
-          }
-          score = (score * currentListSize).toFixed(2)
+        const score = ((prediction.prediction-prediction.originalrank)/prediction.originallistsize)**2
+        if (!users[prediction.discordid]) { users[prediction.discordid] = []; }
+        users[prediction.discordid] = [score].concat(users[prediction.discordid] )
+      })
 
-          return {name: user.uniqueName, score, nPredicts:scores.length, avatar: `https://cdn.discordapp.com/avatars/${userid}/${user.avatar}.png` };
-        })
-      );
+      data = await client.query("SELECT COUNT(1) FROM games WHERE rank != 0");
+      const currentListSize = data.rows[0].count
+
+
+      let leaderboard = await Promise.all(Object.keys(users).map(async (userid) => {
+        const data = await client.query("SELECT * FROM users WHERE discordid = $1", [userid]);
+        const userdata = data.rows[0]
+        const scores = users[userid].filter(x => x !==Infinity)
+        let score;
+        if (scores.length === 0){
+          score = Infinity;
+        } else {
+          score = Math.sqrt(scores.reduce((prev, curr) => prev + curr)/scores.length)
+        }
+        score = (score * currentListSize).toFixed(2)
+
+        return {name: userdata.uniquename, score, nPredicts:users[userid].length, avatar: `https://cdn.discordapp.com/avatars/${userid}/${userdata.avatar}.png` };
+      }));
 
       // Filter out anyone who only predicted late
       leaderboard = leaderboard.filter(x => x.nPredicts !== 0);
@@ -465,3 +347,55 @@ async function main() {
   }
 }
 main();
+
+
+async function setupDb(){
+  // Predictions
+  await client.query(`CREATE TABLE IF NOT EXISTS predictions (
+    discordid text NOT NULL,
+    gameid int NOT NULL,
+    prediction int NOT NULL,
+    timestamp int NOT NULL,
+    PRIMARY KEY(discordid, gameid)
+  );`)
+
+
+  // //Games
+  // gameid episodeid name rank originalRank originalListSize predictCloseTimestamp coverURL igdbid 
+  await client.query(`CREATE TABLE IF NOT EXISTS games (
+    id SERIAL PRIMARY KEY,
+    episodeid int,
+    name text NOT NULL,
+    rank int NOT NULL,
+    originalrank int,
+    originallistsize int,
+    predictclosedtimestamp int,
+    coverurl text,
+    igdbid int
+  );`)
+
+  // //Episodes
+  // episodeid episodeLink
+  await client.query(`CREATE TABLE IF NOT EXISTS episodes (
+    id int NOT NULL PRIMARY KEY,
+    url text
+  );`);
+
+  // //Users
+  // discordId  admin uniqueName avatar
+  await client.query(`CREATE TABLE IF NOT EXISTS users (
+    discordid text NOT NULL PRIMARY KEY,
+    admin bool,
+    uniquename text,
+    avatar text
+  );`);
+}
+
+async function isUserAdmin(discordId){
+  const data = await client.query(`SELECT admin from users WHERE discordid='${discordId}'`);
+  return data.rows[0]?.admin === true;
+}
+
+async function setUserAdmin(discordId, state){
+  const res = await client.query(`INSERT INTO users (discordid, admin) VALUES ($1,$2) ON CONFLICT (discordid) DO UPDATE SET admin = $2`, [discordId, state])
+}
