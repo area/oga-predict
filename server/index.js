@@ -12,9 +12,14 @@ let parser = new Parser();
 const igdb = require('igdb-api-node').default;
 let igdbClient;
 const { Client } = require('pg')
-const client = new Client({connectionString: process.env.DATABASE_URL})
 
 const isDev = process.env.NODE_ENV !== 'production';
+
+const postgresOptions = {connectionString: process.env.DATABASE_URL};
+if (!isDev){
+  postgresOptions.ssl = { rejectUnauthorized: false }
+} 
+
 const PORT = process.env.PORT || 5000;
 const bodyParser = require('body-parser');
 
@@ -33,6 +38,7 @@ async function main() {
     });
 
   } else {
+    const client = new Client(postgresOptions)
 
     // Get twitch token for igdb
     const twitchResponse = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${process.env.TWITCH_CLIENT_ID}&client_secret=${process.env.TWITCH_CLIENT_SECRET}&grant_type=client_credentials`,{method: "POST"});
@@ -55,7 +61,7 @@ async function main() {
     var sess = {
       secret: process.env.SESSION_SECRET,
       cookie: {},
-      store:new (require('connect-pg-simple')(session))({"createTableIfMissing": true}), // DATABASE_URL is postgres, this will work
+      store:new (require('connect-pg-simple')(session))({"conObject": postgresOptions, "createTableIfMissing": true}), // DATABASE_URL is postgres, this will work
     }
 
     if (app.get('env') === 'production') {
@@ -344,58 +350,60 @@ async function main() {
     app.listen(PORT, function () {
       console.error(`Node ${isDev ? 'dev server' : 'cluster worker '+process.pid}: listening on port ${PORT}`);
     });
+
+    async function setupDb(){
+      // Predictions
+      await client.query(`CREATE TABLE IF NOT EXISTS predictions (
+        discordid text NOT NULL,
+        gameid int NOT NULL,
+        prediction int NOT NULL,
+        timestamp int NOT NULL,
+        PRIMARY KEY(discordid, gameid)
+      );`)
+
+
+      // //Games
+      // gameid episodeid name rank originalRank originalListSize predictCloseTimestamp coverURL igdbid 
+      await client.query(`CREATE TABLE IF NOT EXISTS games (
+        id SERIAL PRIMARY KEY,
+        episodeid int,
+        name text NOT NULL,
+        rank int NOT NULL,
+        originalrank int,
+        originallistsize int,
+        predictclosedtimestamp int,
+        coverurl text,
+        igdbid int
+      );`)
+
+      // //Episodes
+      // episodeid episodeLink
+      await client.query(`CREATE TABLE IF NOT EXISTS episodes (
+        id int NOT NULL PRIMARY KEY,
+        url text
+      );`);
+
+      // //Users
+      // discordId  admin uniqueName avatar
+      await client.query(`CREATE TABLE IF NOT EXISTS users (
+        discordid text NOT NULL PRIMARY KEY,
+        admin bool,
+        uniquename text,
+        avatar text
+      );`);
+    }
+
+    async function isUserAdmin(discordId){
+      const data = await client.query(`SELECT admin from users WHERE discordid='${discordId}'`);
+      return data.rows[0]?.admin === true;
+    }
+
+    async function setUserAdmin(discordId, state){
+      const res = await client.query(`INSERT INTO users (discordid, admin) VALUES ($1,$2) ON CONFLICT (discordid) DO UPDATE SET admin = $2`, [discordId, state])
+    }
   }
+
 }
 main();
 
 
-async function setupDb(){
-  // Predictions
-  await client.query(`CREATE TABLE IF NOT EXISTS predictions (
-    discordid text NOT NULL,
-    gameid int NOT NULL,
-    prediction int NOT NULL,
-    timestamp int NOT NULL,
-    PRIMARY KEY(discordid, gameid)
-  );`)
-
-
-  // //Games
-  // gameid episodeid name rank originalRank originalListSize predictCloseTimestamp coverURL igdbid 
-  await client.query(`CREATE TABLE IF NOT EXISTS games (
-    id SERIAL PRIMARY KEY,
-    episodeid int,
-    name text NOT NULL,
-    rank int NOT NULL,
-    originalrank int,
-    originallistsize int,
-    predictclosedtimestamp int,
-    coverurl text,
-    igdbid int
-  );`)
-
-  // //Episodes
-  // episodeid episodeLink
-  await client.query(`CREATE TABLE IF NOT EXISTS episodes (
-    id int NOT NULL PRIMARY KEY,
-    url text
-  );`);
-
-  // //Users
-  // discordId  admin uniqueName avatar
-  await client.query(`CREATE TABLE IF NOT EXISTS users (
-    discordid text NOT NULL PRIMARY KEY,
-    admin bool,
-    uniquename text,
-    avatar text
-  );`);
-}
-
-async function isUserAdmin(discordId){
-  const data = await client.query(`SELECT admin from users WHERE discordid='${discordId}'`);
-  return data.rows[0]?.admin === true;
-}
-
-async function setUserAdmin(discordId, state){
-  const res = await client.query(`INSERT INTO users (discordid, admin) VALUES ($1,$2) ON CONFLICT (discordid) DO UPDATE SET admin = $2`, [discordId, state])
-}
