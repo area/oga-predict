@@ -35,7 +35,7 @@ function App() {
       .then(json => {
         if (json.username){
           setUsername(`${json.username}#${json.discriminator}`);
-          setIsAdmin(`${json.admin}`)
+          setIsAdmin(json.admin);
         }
       }).catch(e => {
         console.log(e);
