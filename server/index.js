@@ -176,6 +176,16 @@ async function main() {
       // Add game
       await pool.query("INSERT INTO games (episodeid, name, rank, originalrank, igdbid, coverurl) VALUES ($1, $2, $3, $4, $5, $6)", [req.body.episodeid, req.body.name, req.body.rank, req.body.rank, req.body.igdbid, coverURL])
 
+      let feed = await parser.parseURL('https://feed.podbean.com/oldgamersalmanac/feed.xml');
+
+      const episode = feed.items.filter(item => {
+        return item.itunes.episode === req.body.episodeid.toString()
+      })[0];
+
+      if (episode){
+        await pool.query(`INSERT INTO episodes (id, url) VALUES ($1,$2) ON CONFLICT (id) DO UPDATE SET url = $2`, [req.params.id, episode.link])
+      }
+
       res.send("");
     }));
 

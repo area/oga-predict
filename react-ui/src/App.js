@@ -66,7 +66,7 @@ function App() {
           </Navbar.Collapse>
               <Navbar.Collapse className="justify-content-end">
             <Navbar.Text>
-              { username ? `Logged in as ${username}` : <a href="/login">Login</a> }
+              { username ? `Logged in as ${username}` : <a href="/login">Login via Discord</a> }
             </Navbar.Text>
           </Navbar.Collapse>
         </Container>
