@@ -37,6 +37,7 @@ const PredictForm = (props) => {
         name, rank, id
         };
       props.handleOnSubmit(game);
+      errorMsg = 'Submitted'; // Not actually an error message, but works for now.
     } else {
       errorMsg = 'Please fill out all the fields.';
     }
