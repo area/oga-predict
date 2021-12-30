@@ -5,7 +5,6 @@ import {
 } from "react-router-dom";
 
 const PredictForm = (props) => {
-  console.log(props)
 
   const [game, setGame] = useState({
     name: "",

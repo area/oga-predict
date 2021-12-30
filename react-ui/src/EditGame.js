@@ -17,7 +17,6 @@ const EditGame = () => {
         return response.json();
       })
       .then(json => {
-        console.log(json)
         setGame(json)
       }).catch(e => {
         console.log(e);
@@ -30,7 +29,6 @@ const EditGame = () => {
 
 
   const handleOnSubmit = (game) => {
-    console.log(JSON.stringify({...game}))
       fetch(`/api/games/${id}`, {
             method: "POST",
             headers: {

@@ -3,7 +3,6 @@ import GameForm from './GameForm';
 
 const AddGame = () => {
   const handleOnSubmit = (game) => {
-    console.log(JSON.stringify({...game}))
       fetch("/api/games", {
             method: "POST",
             headers: {

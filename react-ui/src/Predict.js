@@ -35,7 +35,6 @@ function Predict(props) {
   });
 
   const handleOnSubmit = (game) => {
-    console.log(JSON.stringify({...game}))
       fetch("/api/predict", {
             method: "POST",
             headers: {
