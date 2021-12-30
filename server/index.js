@@ -289,10 +289,11 @@ async function main() {
       }
 
       // Did we just close a predict?
-      if (oldRank === 0 && req.body.rank !== 0){
+      if (oldRank === 0 && req.body.rank !== "0"){
         let nonZeroCount = games.filter(x => x.rank != 0).length + 1; // We are now in the list, but not in games which exluded ourselves
-
-        await pool.query("UPDATE games SET (predictclosedtimestamp, originalrank, originallistsize) = ($1, $2, $3) WHERE id = $4", [Math.floor(new Date(episode.isoDate).getTime()/1000), req.body.rank, nonZeroCount, req.params.id])
+        let date;
+        if (!episode?.isoDate) { date = Date.now()} else { date = episode.isoDate}
+        await pool.query("UPDATE games SET (predictclosedtimestamp, originalrank, originallistsize) = ($1, $2, $3) WHERE id = $4", [Math.floor(new Date(date).getTime()/1000), req.body.rank, nonZeroCount, req.params.id])
 
       }
 
@@ -355,7 +356,6 @@ async function main() {
 
       data = await pool.query("SELECT COUNT(1) FROM games WHERE rank != 0");
       const currentListSize = data.rows[0].count
-
 
       let leaderboard = await Promise.all(Object.keys(users).map(async (userid) => {
         const data = await pool.query("SELECT * FROM users WHERE discordid = $1", [userid]);
