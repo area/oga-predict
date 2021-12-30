@@ -125,7 +125,7 @@ async function main() {
       const json = await response.json();
       req.session.accessToken = json.access_token;
       req.session.refreshToken = json.refresh_token;
-      res.redirect(`/?token=${json.access_token}`);
+      res.redirect(`/`);
     }));
 
     app.get('/account', catchAsync(async (req, res) => {
