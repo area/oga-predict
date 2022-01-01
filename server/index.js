@@ -72,6 +72,8 @@ async function main() {
     var sess = {
       secret: process.env.SESSION_SECRET,
       cookie: {},
+      resave: false,
+      saveUninitialized: false,
       store:new (require('connect-pg-simple')(session))({"pool": pool, "createTableIfMissing": true}), // DATABASE_URL is postgres, this will work
     }
 
