@@ -27,7 +27,7 @@ const bodyParser = require('body-parser');
 
 function requireHTTPS(req, res, next) {
   // The 'x-forwarded-proto' check is for Heroku
-  if (!req.secure && req.get('x-forwarded-proto') !== 'https' && process.env.NODE_ENV !== "development") {
+  if (!req.secure && req.get('x-forwarded-proto') !== 'https' && !isDev) {
     return res.redirect('https://' + req.get('host') + req.url);
   }
   next();
@@ -196,7 +196,7 @@ async function main() {
       })[0];
 
       if (episode){
-        await pool.query(`INSERT INTO episodes (id, url) VALUES ($1,$2) ON CONFLICT (id) DO UPDATE SET url = $2`, [req.params.id, episode.link])
+        await pool.query(`INSERT INTO episodes (id, url) VALUES ($1,$2) ON CONFLICT (id) DO UPDATE SET url = $2`, [req.body.episodeid, episode.link])
       }
 
       res.send("");
@@ -296,7 +296,7 @@ async function main() {
       })[0];
 
       if (episode){
-        await pool.query(`INSERT INTO episodes (id, url) VALUES ($1,$2) ON CONFLICT (id) DO UPDATE SET url = $2`, [req.params.id, episode.link])
+        await pool.query(`INSERT INTO episodes (id, url) VALUES ($1,$2) ON CONFLICT (id) DO UPDATE SET url = $2`, [req.body.episodeid, episode.link])
       }
 
       // Did we just close a predict?
