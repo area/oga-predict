@@ -255,9 +255,9 @@ async function main() {
         }
         // All predictions for a lower slot move down one
         for (let prediction of predictions) {
-          if (parseInt(prediction.prediction) >= parseInt(oldRank)) {
+          if (parseInt(prediction.prediction) >= parseInt(req.body.rank)) {
             // Move the prediction
-            await pool.query("UPDATE predictions SET prediction=$1 WHERE gameid = $2 AND discordid = $3", [prediction.prediction - 1, prediction.gameid, prediction.discordid])
+            await pool.query("UPDATE predictions SET prediction=$1 WHERE gameid = $2 AND discordid = $3", [prediction.prediction + 1, prediction.gameid, prediction.discordid])
           }
         }
       } else {
