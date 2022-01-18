@@ -224,8 +224,8 @@ async function main() {
       data = await pool.query("SELECT rank, id FROM games WHERE id != $1 AND rank != 0", [req.params.id]);
       games = data.rows;
 
-      // Get all predictions not about this game
-      data = await pool.query("SELECT prediction, discordid, gameid FROM predictions where gameid != $1", [req.params.id]);
+      // Get all predictions not about this game that are still live
+      data = await pool.query("SELECT prediction, discordid, gameid FROM predictions INNER JOIN games ON predictions.gameid = games.id where gameid != $1 and games.originalRank = 0", [req.params.id]);
       const predictions = data.rows;
 
       if (req.body.rank === "0" && oldRank !== 0 ){
